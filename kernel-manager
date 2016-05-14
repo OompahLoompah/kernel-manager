@@ -1,0 +1,116 @@
+#!/bin/bash
+
+set -e
+
+#Regex for determining if we have a git link or not... keeping it very loose for now
+regex='^[^/]*/[^/]*$'
+
+download ()
+{
+  if [[ $1 =~ $regex ]];
+    then
+      PROJECT_DIR=`echo $1 | grep -o -e '/.*' | cut -c 2-`
+      if [ -d $PROJECT_DIR ]
+        then
+          echo "Pulling kernel repo updates"
+          cd $PROJECT_DIR
+          git pull
+          cd ../
+        else
+          echo "Cloning kernel repo"
+          git clone https://github.com/$1.git
+      fi
+      echo 'Done!'
+    else
+      wget https://cdn.kernel.org/pub/linux/kernel/v${1:0:1}.x/linux-$1.tar.xz
+      echo 'Extracting kernel source...'
+      tar -xf linux-$1.tar.xz
+      rm linux-$1.tar.xz
+      echo 'Done!'
+  fi
+}
+
+make_kernel()
+{
+  if [ ! -z "$1" ]
+    then
+      if [[ $1 =~ $regex ]];
+        then
+          cd `echo $1 | grep -o -e '/.*' | cut -c 2-`
+        else
+          cd linux-$1
+      fi
+  fi
+
+  if [ ! "$UNCLEAN" = true ]
+    then
+      echo 'Cleaning build directory...'
+      make clean && make mrproper
+      echo 'Done!'
+  fi
+
+  if [ ! -z "$CONFIG" ]
+    then
+      cp $CONFIG .config
+    else
+      if [ ! -f .config ]
+        then
+          make menuconfig
+      fi
+  fi
+  make deb-pkg
+}
+
+while getopts ":c:d:hmp:u" opt; do
+  case $opt in
+    c)
+      if [ -f $OPTARG ]
+        then
+          CONFIG="$(cd "$(dirname "$OPTARG")"; pwd)/$(basename "$OPTARG")"
+        else
+          echo "No such .config"
+          exit 1
+      fi
+      ;;
+    d)
+      KERNEL="$OPTARG"
+      ;;
+    h)
+      echo "help text"
+      ;;
+    m)
+      MAKE_KERNEL=true
+      ;;
+    p)
+      PACKAGE_KERNEL=true
+      echo "Packaging kernel"
+      ;;
+    u)
+      UNCLEAN=true
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG"
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument"
+      exit 1
+      ;;
+  esac
+done
+
+if [ ! -z "$KERNEL" ]
+  then
+    download $KERNEL
+fi
+
+if [ "$MAKE_KERNEL" = true ]
+  then
+    if [ ! -z "$KERNEL" ]
+      then
+        make_kernel $KERNEL
+      else
+        make_kernel
+    fi
+fi
+
